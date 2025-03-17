@@ -97,8 +97,8 @@ QPushButton {
     color: #E8E8E8;
     border: 1px solid #4A4A4A;
     border-radius: 4px;
-    padding: 8px 18px;
-    min-width: 90px;
+    padding: 0px 0px;
+    min-width: fit-content;
     font-weight: 500;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
@@ -148,7 +148,7 @@ QLineEdit, QPlainTextEdit, QComboBox, QSpinBox {
 
 QComboBox::drop-down {
     border-left: 1px solid #3C3C3C;
-    width: 24px;
+    width: fit-content;
 }
 
 /* Modern Tab Widget */
@@ -170,9 +170,9 @@ QTabBar::tab {
 }
 
 QTabBar::tab:selected {
-    background-color: #262626;
-    color: #4E93D4;
-    border-bottom: 3px solid #4E93D4;
+    background-color: #ffffff;
+    color: #00007f;
+    border-bottom: 3px solid #00007f;
     margin-bottom: -1px;
 }
 
