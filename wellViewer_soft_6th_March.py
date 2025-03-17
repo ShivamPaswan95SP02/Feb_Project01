@@ -499,7 +499,7 @@ class WellLogViewer(QMainWindow):
         load_folder_action.triggered.connect(self.load_las_folder)
         file_menu.addAction(load_folder_action)
 
-        load_files_action = QAction("Load LAS Files (Multiple)", self)
+        load_files_action = QAction("Load LAS Files", self)
         load_files_action.triggered.connect(self.load_las_files)
         file_menu.addAction(load_files_action)
 
