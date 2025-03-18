@@ -64,7 +64,7 @@ QDockWidget {
 }
 
 QDockWidget::title {
-    background-color: #BC6C25;
+    background-color: #e2e2e2;
     font-color: #262626;
     padding: 6px;
     color: #FEFAE0;

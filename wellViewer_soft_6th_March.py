@@ -179,6 +179,7 @@ class CurveControl(QWidget):
             color: Black;
             font: 10pt;
             padding: 2px;
+            height: 30px;                
         """)
 
         # **Curve Number Label**
@@ -289,33 +290,46 @@ class TrackControl(QWidget):
 
         range_layout = QHBoxLayout()
         self.grid = QCheckBox("Grid")
+        self.grid.setFixedWidth(100)  # Set fixed width
         self.grid.stateChanged.connect(self.changed.emit)
         range_layout.addWidget(self.grid)
 
         self.flip_y = QCheckBox("Flip Y-Axis")  # New checkbox for flipping Y-axis
         self.flip_y.stateChanged.connect(self.changed.emit)
+        self.flip_y.setFixedWidth(100)  # Set fixed width
         range_layout.addWidget(self.flip_y)
 
         # Background Color Selection Button
         self.bg_color_btn = QPushButton("Bg Color")
         self.bg_color_btn.setStyleSheet(f"background-color: {self.bg_color}; border: none;")
+        self.bg_color_btn.setFixedWidth(100)  # Set fixed width
         self.bg_color_btn.clicked.connect(self.select_bg_color)
         range_layout.addWidget(self.bg_color_btn)
 
-        # Y min and Y max input fields
-        range_layout.addWidget(QLabel("Y min:"))
+        
+        # Y min and Y max input fields with fixed width labels
+        y_min_label = QLabel("Y min:")
+        y_min_label.setFixedWidth(50)  # Set fixed width for the label
+        range_layout.addWidget(y_min_label)
+
         self.y_min = QLineEdit()
         self.y_min.setStyleSheet("background-color: White; color: blue; font: 12pt;")
         self.y_min.setPlaceholderText("Auto")
+        self.y_min.setFixedWidth(60)  # Set fixed width for the input field
         self.y_min.textChanged.connect(self.changed.emit)  # Connect to changed signal
         range_layout.addWidget(self.y_min)
 
-        range_layout.addWidget(QLabel("Y max:"))
+        y_max_label = QLabel("Y max:")
+        y_max_label.setFixedWidth(50)  # Set fixed width for the label
+        range_layout.addWidget(y_max_label)
+
         self.y_max = QLineEdit()
         self.y_max.setStyleSheet("background-color: White; color: blue; font: 12pt;")
         self.y_max.setPlaceholderText("Auto")
+        self.y_max.setFixedWidth(60)  # Set fixed width for the input field
         self.y_max.textChanged.connect(self.changed.emit)  # Connect to changed signal
         range_layout.addWidget(self.y_max)
+
 
         layout.addLayout(range_layout)
 
@@ -326,7 +340,7 @@ class TrackControl(QWidget):
         layout.addWidget(self.curve_tabs)
 
         add_curve_btn = QPushButton("Add Curve")
-        add_curve_btn.setFixedSize(100, 30)
+        add_curve_btn.setFixedSize(120, 30)
         add_curve_btn.setStyleSheet("background-color: White; border-radius: 5px; color: Green; font: 12pt;")
         add_curve_btn.clicked.connect(lambda: self.add_curve(curves))
         layout.addWidget(add_curve_btn)
