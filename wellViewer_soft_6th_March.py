@@ -98,7 +98,8 @@ class FigureWidget(QWidget):
                     twin_ax.xaxis.set_label_position('top')
                     twin_ax.spines['top'].set_color(curve.color)
                     twin_ax.spines['top'].set_linewidth(2)
-                    twin_ax.spines['top'].set_position(('axes', 1 + i * 0.1))  # Adjust the gap here
+                    twin_ax.spines['top'].set_position(('axes', 1 + i * 0.025))  # Adjust the gap here
+                    twin_ax.tick_params(axis='x', colors=curve.color)
                     twin_ax.set_xlabel(curve_name, color=curve.color)
 
                     line, = twin_ax.plot(
