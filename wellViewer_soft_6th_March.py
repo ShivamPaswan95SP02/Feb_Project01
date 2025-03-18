@@ -719,7 +719,7 @@ class WellLogViewer(QMainWindow):
 
 app = QApplication(sys.argv)
 app.setStyleSheet(loadStyleSheet("style/darkmode.qss"))
-viewer = WellLogViewer()
+viewer = WellLogViewer()    
 viewer.show()
 
 sys.exit(app.exec_())
