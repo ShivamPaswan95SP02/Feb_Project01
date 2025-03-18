@@ -14,6 +14,9 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 
+# Update the overall font size on plots
+plt.rcParams.update({'font.size': 8.5})
+
 def loadStyleSheet(fileName):
     try:
         with open(fileName, "r") as f:
@@ -45,7 +48,7 @@ class FigureWidget(QWidget):
     def __init__(self, well_name, parent=None):
         super().__init__(parent)
         self.well_name = well_name
-        self.figure = Figure()
+        self.figure = Figure(layout="constrained")  # Use constrained layout
         self.canvas = FigureCanvas(self.figure)
         layout = QVBoxLayout(self)
         layout.addWidget(self.canvas)
@@ -84,12 +87,21 @@ class FigureWidget(QWidget):
                     ax.text(0.5, 0.5, "No curves", ha='center', va='center')
                     continue
 
-                for curve in track.curves:
+                for i, curve in enumerate(track.curves):
                     curve_name = curve.curve_box.currentText()
                     if curve_name == "Select Curve" or curve_name not in data.columns:
                         continue
 
-                    line, = ax.plot(
+                    # Create a new axis for each curve to manage individual x-axis limits
+                    twin_ax = ax.twiny()
+                    twin_ax.xaxis.set_ticks_position('top')
+                    twin_ax.xaxis.set_label_position('top')
+                    twin_ax.spines['top'].set_color(curve.color)
+                    twin_ax.spines['top'].set_linewidth(2)
+                    twin_ax.spines['top'].set_position(('axes', 1 + i * 0.1))  # Adjust the gap here
+                    twin_ax.set_xlabel(curve_name, color=curve.color)
+
+                    line, = twin_ax.plot(
                         data[curve_name], depth,
                         color=curve.color,
                         linewidth=curve.width.value(),
@@ -102,47 +114,26 @@ class FigureWidget(QWidget):
                     lines_list.append(line)
 
                     if curve.flip.isChecked():
-                        ax.invert_xaxis()         
+                        twin_ax.invert_xaxis()
 
                     # Apply individual x-axis limits for each curve
                     if curve.x_min.text():
                         try:
-                            ax.set_xlim(float(curve.x_min.text()), ax.get_xlim()[1])
+                            twin_ax.set_xlim(float(curve.x_min.text()), twin_ax.get_xlim()[1])
                         except ValueError:
                             pass
                     if curve.x_max.text():
                         try:
-                            ax.set_xlim(ax.get_xlim()[0], float(curve.x_max.text()))
+                            twin_ax.set_xlim(twin_ax.get_xlim()[0], float(curve.x_max.text()))
                         except ValueError:
                             pass
 
                     # Apply individual scale setting for each curve
                     if curve.scale_combobox.currentText() == "Log":
-                        ax.set_xscale('log')
+                        twin_ax.set_xscale('log')
                     else:
-                        ax.set_xscale('linear')
+                        twin_ax.set_xscale('linear')
 
-                # For the first curve, set the top x-axis label with its color.
-                if valid_curves:
-                    first_curve = valid_curves[0]
-                    twin_ax = ax.twiny()
-                    twin_ax.xaxis.set_ticks_position('top')
-                    twin_ax.xaxis.set_label_position('top')
-                    twin_ax.spines['top'].set_color(first_curve.color)
-                    twin_ax.spines['top'].set_linewidth(2)
-                    twin_ax.set_xlabel(first_curve.curve_box.currentText(), color=first_curve.color)
-                    twin_ax.set_xlim(ax.get_xlim())  # synchronize x-limits with the main axis
-                    ax.xaxis.set_visible(False)  # Hide the bottom x-axis
-
-                    # Adjust the position of the top spine for subsequent curves
-                    for i, curve in enumerate(valid_curves[1:], start=1):
-                        twin_ax = ax.twiny()
-                        twin_ax.spines['top'].set_position(('axes', 1 + i * 0.1))  # Adjust the gap here
-                        twin_ax.spines['top'].set_color(curve.color)
-                        twin_ax.spines['top'].set_linewidth(2)
-                        twin_ax.set_xlabel(curve.curve_box.currentText(), color=curve.color)
-                        twin_ax.set_xlim(ax.get_xlim())
-                
                 if idx == 0:
                     ax.set_ylabel("Depth")
                 ax.grid(track.grid.isChecked())
@@ -163,11 +154,14 @@ class FigureWidget(QWidget):
                     except ValueError:
                         pass
 
+                # Remove x-axis labels for the primary axis
+                ax.set_xticklabels([])
+
             # Add a title to the figure using the well name in a box
             self.figure.suptitle(f"Well: {self.well_name}", fontsize=11, alpha=0.6)
 
             # Adjust layout to remove gaps between tracks and make space for the title
-            self.figure.subplots_adjust(wspace=0, hspace=0, top=0.82, bottom=0.01, left=0.25)
+            self.figure.subplots_adjust(wspace=0, hspace=0)
 
         self.canvas.draw()
 
@@ -185,6 +179,7 @@ class CurveControl(QWidget):
             color: Black;
             font: 10pt;
             padding: 2px;
+            height: 30px;                
         """)
 
         # **Curve Number Label**
@@ -295,33 +290,46 @@ class TrackControl(QWidget):
 
         range_layout = QHBoxLayout()
         self.grid = QCheckBox("Grid")
+        self.grid.setFixedWidth(100)  # Set fixed width
         self.grid.stateChanged.connect(self.changed.emit)
         range_layout.addWidget(self.grid)
 
         self.flip_y = QCheckBox("Flip Y-Axis")  # New checkbox for flipping Y-axis
         self.flip_y.stateChanged.connect(self.changed.emit)
+        self.flip_y.setFixedWidth(100)  # Set fixed width
         range_layout.addWidget(self.flip_y)
 
         # Background Color Selection Button
         self.bg_color_btn = QPushButton("Bg Color")
         self.bg_color_btn.setStyleSheet(f"background-color: {self.bg_color}; border: none;")
+        self.bg_color_btn.setFixedWidth(100)  # Set fixed width
         self.bg_color_btn.clicked.connect(self.select_bg_color)
         range_layout.addWidget(self.bg_color_btn)
 
-        # Y min and Y max input fields
-        range_layout.addWidget(QLabel("Y min:"))
+        
+        # Y min and Y max input fields with fixed width labels
+        y_min_label = QLabel("Y min:")
+        y_min_label.setFixedWidth(50)  # Set fixed width for the label
+        range_layout.addWidget(y_min_label)
+
         self.y_min = QLineEdit()
         self.y_min.setStyleSheet("background-color: White; color: blue; font: 12pt;")
         self.y_min.setPlaceholderText("Auto")
+        self.y_min.setFixedWidth(60)  # Set fixed width for the input field
         self.y_min.textChanged.connect(self.changed.emit)  # Connect to changed signal
         range_layout.addWidget(self.y_min)
 
-        range_layout.addWidget(QLabel("Y max:"))
+        y_max_label = QLabel("Y max:")
+        y_max_label.setFixedWidth(50)  # Set fixed width for the label
+        range_layout.addWidget(y_max_label)
+
         self.y_max = QLineEdit()
         self.y_max.setStyleSheet("background-color: White; color: blue; font: 12pt;")
         self.y_max.setPlaceholderText("Auto")
+        self.y_max.setFixedWidth(60)  # Set fixed width for the input field
         self.y_max.textChanged.connect(self.changed.emit)  # Connect to changed signal
         range_layout.addWidget(self.y_max)
+
 
         layout.addLayout(range_layout)
 
@@ -332,7 +340,7 @@ class TrackControl(QWidget):
         layout.addWidget(self.curve_tabs)
 
         add_curve_btn = QPushButton("Add Curve")
-        add_curve_btn.setFixedSize(100, 30)
+        add_curve_btn.setFixedSize(120, 30)
         add_curve_btn.setStyleSheet("background-color: White; border-radius: 5px; color: Green; font: 12pt;")
         add_curve_btn.clicked.connect(lambda: self.add_curve(curves))
         layout.addWidget(add_curve_btn)
@@ -541,7 +549,7 @@ class WellLogViewer(QMainWindow):
         dock_layout.addWidget(btn_add_track)
 
         self.track_tabs = QTabWidget()
-        self.track_tabs.setStyleSheet("background-color: #aaaa7f; border-radius: 5px; color: #53003e; font: 10pt;")
+        self.track_tabs.setStyleSheet("background-color: #e2e2e2; border-radius: 5px; color: #53003e; font: 10pt;")
         self.track_tabs.setTabsClosable(True)  # Enable close button on tabs
         self.track_tabs.tabCloseRequested.connect(self.delete_track)  # Connect tab close event
         dock_layout.addWidget(self.track_tabs)
