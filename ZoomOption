@@ -1,0 +1,516 @@
+import sys
+import os
+import lasio
+import numpy as np
+import pandas as pd
+from PyQt5 import QtCore, QtWidgets
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (QMainWindow, QFileDialog, QDockWidget, QListWidget,
+                             QListWidgetItem, QVBoxLayout, QHBoxLayout, QWidget, QLabel, 
+                             QComboBox, QPushButton, QCheckBox, QSpinBox, QScrollArea, QAction)
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+from matplotlib.patches import Rectangle
+from PyQt5.QtGui import QIcon 
+
+# ----------------------------------------------------------------------
+# FigureWidget Class: A widget that embeds a matplotlib figure and canvas.
+# This widget displays the plot for a single well and now includes a zoom-mode
+# combobox, a "Reset Zoom" button, and updates the cursor based on the zoom mode.
+# In rectangular zoom mode a visible rectangle is drawn while dragging.
+# ----------------------------------------------------------------------
+class FigureWidget(QWidget):
+    def __init__(self, well_name, parent=None):
+        super().__init__(parent)
+        self.well_name = well_name
+        self.figure = Figure()
+        self.canvas = FigureCanvas(self.figure)
+        
+        # Create a combobox for zoom mode selection.
+        self.zoomCombo = QComboBox()
+        self.zoomCombo.addItems(["Pan", "Rectangular", "Horizontal", "Vertical"])
+        self.zoomCombo.currentTextChanged.connect(self.onZoomModeChanged)
+        self.zoom_mode = "Pan"  # default zoom mode
+        
+        # Create a reset zoom button.
+        self.resetButton = QPushButton("Reset Zoom")
+        self.resetButton.clicked.connect(self.resetZoom)
+        
+        # Create a horizontal layout for the zoom controls.
+        controlsLayout = QHBoxLayout()
+        controlsLayout.addWidget(QLabel("Zoom Mode:"))
+        controlsLayout.addWidget(self.zoomCombo)
+        controlsLayout.addWidget(self.resetButton)
+        controlsLayout.addStretch()
+        
+        # Main layout: controls on top, canvas below.
+        layout = QVBoxLayout(self)
+        layout.addLayout(controlsLayout)
+        layout.addWidget(self.canvas)
+        self.setLayout(layout)
+
+        # Initialize variables for custom zoom/pan behavior.
+        self._dragging = False
+        self._press_event = None
+        self._rect = None  # For the rectangular zoom patch
+
+        # Connect mouse events on the canvas.
+        self.canvas.mpl_connect("button_press_event", self.onMousePress)
+        self.canvas.mpl_connect("motion_notify_event", self.onMouseMove)
+        self.canvas.mpl_connect("button_release_event", self.onMouseRelease)
+        self.canvas.mpl_connect("scroll_event", self.onScroll)
+
+    def onZoomModeChanged(self, mode):
+        self.zoom_mode = mode
+        print(f"Zoom mode changed to: {mode}")
+        # Change the cursor based on the selected zoom mode.
+        if mode == "Pan":
+            self.canvas.setCursor(Qt.OpenHandCursor)
+        elif mode == "Rectangular":
+            self.canvas.setCursor(Qt.CrossCursor)
+        elif mode == "Horizontal":
+            self.canvas.setCursor(Qt.SizeHorCursor)
+        elif mode == "Vertical":
+            self.canvas.setCursor(Qt.SizeVerCursor)
+        else:
+            self.canvas.setCursor(Qt.ArrowCursor)
+
+    def onMousePress(self, event):
+        if event.inaxes is None:
+            return
+        if self.zoom_mode == "Rectangular":
+            self._dragging = True
+            self._press_event = event
+            ax = event.inaxes
+            # Create a visible rectangle patch starting at the press location.
+            self._rect = Rectangle((event.xdata, event.ydata), 0, 0,
+                                   fill=False, edgecolor='red', linestyle='--')
+            ax.add_patch(self._rect)
+            self.canvas.draw()
+        elif self.zoom_mode == "Pan":
+            self._dragging = True
+            self._press_event = event
+
+    def onMouseMove(self, event):
+        if not self._dragging or event.inaxes is None or self._press_event is None:
+            return
+        ax = event.inaxes
+        if self.zoom_mode == "Pan":
+            # Calculate horizontal (or vertical if Ctrl is pressed) panning.
+            dx = event.xdata - self._press_event.xdata
+            dy = event.ydata - self._press_event.ydata
+            if event.key == "control":
+                y0, y1 = ax.get_ylim()
+                ax.set_ylim(y0 - dy, y1 - dy)
+            else:
+                x0, x1 = ax.get_xlim()
+                ax.set_xlim(x0 - dx, x1 - dx)
+            self.canvas.draw()
+            self._press_event = event  # update for smooth dragging
+        elif self.zoom_mode == "Rectangular" and self._rect is not None:
+            # Update the rectangle patch dimensions as the mouse moves.
+            x0, y0 = self._press_event.xdata, self._press_event.ydata
+            x1, y1 = event.xdata, event.ydata
+            xmin = min(x0, x1)
+            ymin = min(y0, y1)
+            width = abs(x1 - x0)
+            height = abs(y1 - y0)
+            self._rect.set_xy((xmin, ymin))
+            self._rect.set_width(width)
+            self._rect.set_height(height)
+            self.canvas.draw()
+
+    def onMouseRelease(self, event):
+        if not self._dragging or event.inaxes is None:
+            return
+        ax = event.inaxes
+        if self.zoom_mode == "Rectangular" and self._rect is not None:
+            # Calculate rectangle boundaries.
+            x0, y0 = self._press_event.xdata, self._press_event.ydata
+            x1, y1 = event.xdata, event.ydata
+            xmin, xmax = sorted([x0, x1])
+            ymin, ymax = sorted([y0, y1])
+            ax.set_xlim(xmin, xmax)
+            ax.set_ylim(ymin, ymax)
+            # Remove the rectangle patch.
+            self._rect.remove()
+            self._rect = None
+            self.canvas.draw()
+        # For Pan mode, no extra work is needed on release.
+        self._dragging = False
+        self._press_event = None
+
+    def onScroll(self, event):
+        if event.inaxes is None:
+            return
+        ax = event.inaxes
+        base_scale = 1.1
+        if event.button == "up":
+            scale_factor = 1 / base_scale
+        elif event.button == "down":
+            scale_factor = base_scale
+        else:
+            scale_factor = 1
+
+        if self.zoom_mode == "Horizontal":
+            if event.key == "control":
+                y0, y1 = ax.get_ylim()
+                ydata = event.ydata
+                new_range = (y1 - y0) * scale_factor
+                ax.set_ylim([ydata - new_range / 2, ydata + new_range / 2])
+            else:
+                x0, x1 = ax.get_xlim()
+                xdata = event.xdata
+                new_range = (x1 - x0) * scale_factor
+                ax.set_xlim([xdata - new_range / 2, xdata + new_range / 2])
+            self.canvas.draw()
+        elif self.zoom_mode == "Vertical":
+            if event.key == "control":
+                x0, x1 = ax.get_xlim()
+                xdata = event.xdata
+                new_range = (x1 - x0) * scale_factor
+                ax.set_xlim([xdata - new_range / 2, xdata + new_range / 2])
+            else:
+                y0, y1 = ax.get_ylim()
+                ydata = event.ydata
+                new_range = (y1 - y0) * scale_factor
+                ax.set_ylim([ydata - new_range / 2, ydata + new_range / 2])
+            self.canvas.draw()
+
+    def resetZoom(self):
+        # Reset all axes to their initial limits stored after the last update_plot call.
+        if not hasattr(self, '_initial_limits'):
+            return
+        for ax, limits in zip(self.figure.axes, self._initial_limits):
+            ax.set_xlim(limits[0])
+            ax.set_ylim(limits[1])
+        self.canvas.draw()
+        print("Zoom reset to default limits.")
+
+    def update_plot(self, data, tracks, well_name):
+        self.figure.clear()
+        n_tracks = len(tracks)
+        if n_tracks == 0:
+            ax = self.figure.add_subplot(111)
+            ax.text(0.5, 0.5, "No track controls", horizontalalignment='center', verticalalignment='center')
+        else:
+            # Create one subplot per track sharing the y-axis.
+            axes = self.figure.subplots(1, n_tracks, sharey=True)
+            if n_tracks == 1:
+                axes = [axes]
+            depth = data['DEPT']
+            for idx, (ax, track) in enumerate(zip(axes, tracks)):
+                curve = track.curve.currentText()
+                if curve == "Select Curve":
+                    ax.text(0.5, 0.5, "No curve selected", horizontalalignment='center', verticalalignment='center')
+                    continue
+                if curve in data.columns:
+                    ax.plot(data[curve], depth,
+                            color=track.color.currentText(),
+                            linewidth=track.width.value(),
+                            linestyle=track.style.currentText())
+                ax.set_xlabel(curve)
+                ax.set_ylabel("Depth")
+                ax.grid(track.grid.isChecked())
+                if track.flip.isChecked():
+                    ax.invert_xaxis()
+                ax.set_ylim(depth.max(), depth.min())
+                ax.legend([well_name])
+        self.figure.subplots_adjust(wspace=0.1)
+        self.canvas.draw()
+        # Store the initial axis limits to use when resetting zoom.
+        self._initial_limits = []
+        for ax in self.figure.axes:
+            self._initial_limits.append((ax.get_xlim(), ax.get_ylim()))
+
+
+# ----------------------------------------------------------------------
+# WellLogViewer Class: Main window that holds controls and a horizontal scrollable area
+# for displaying multiple figures (one per selected well) side-by-side.
+# Now the control panel includes a "Sync Zoom" button to synchronize zoom
+# across all figures.
+# ----------------------------------------------------------------------
+class WellLogViewer(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.wells = {}               # Loaded wells: well name -> {'data': DataFrame, 'path': filepath}
+        self.tracks = []              # List of active track controls
+        self.figure_widgets = {}      # Map well name -> FigureWidget
+        self.initUI()
+        self.setStyleSheet(self.loadStyle())
+        self.setWindowIcon(QIcon('ongc.png'))
+
+    def initUI(self):
+        self.setWindowTitle('WellVision ONGC')
+        self.setGeometry(100, 100, 1200, 800)
+        
+        # Create a central scroll area to hold all figure widgets arranged horizontally.
+        self.figure_scroll = QScrollArea()
+        self.figure_container = QWidget()
+        self.figure_layout = QHBoxLayout(self.figure_container)
+        self.figure_container.setLayout(self.figure_layout)
+        self.figure_scroll.setWidgetResizable(True)
+        self.figure_scroll.setWidget(self.figure_container)
+        self.setCentralWidget(self.figure_scroll)
+        
+        # Menubar with "File" menu actions.
+        menubar = self.menuBar()
+        file_menu = menubar.addMenu("File")
+        
+        load_folder_action = QAction("Load LAS Folder", self)
+        load_folder_action.triggered.connect(self.load_las_folder)
+        file_menu.addAction(load_folder_action)
+        
+        toggle_controls_action = QAction("Toggle Controls", self)
+        toggle_controls_action.triggered.connect(self.toggle_controls)
+        menubar.addAction(toggle_controls_action)
+
+
+
+        menubar.addMenu("Settings")
+        menubar.addMenu("Show DataTop")
+
+        
+        # Create a dock widget for controls.
+        self.dock = QDockWidget("Controls", self)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.dock)
+        
+        dock_widget = QWidget()
+        dock_layout = QVBoxLayout()
+        
+        # Wells list (checkable items, unchecked by default).
+        self.well_list = QListWidget()
+        self.well_list.itemChanged.connect(self.update_plot)
+        dock_layout.addWidget(QLabel("Loaded Wells:"))
+        dock_layout.addWidget(self.well_list)
+        
+        # Scroll area for track controls.
+        self.scroll_area = QScrollArea()
+        self.scroll_widget = QWidget()
+        self.track_container = QVBoxLayout(self.scroll_widget)
+        self.scroll_widget.setLayout(self.track_container)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setWidget(self.scroll_widget)
+        dock_layout.addWidget(self.scroll_area)
+
+        # Button to add a new track control.
+        btn_add_track = QPushButton("Add Track")
+        btn_add_track.clicked.connect(self.add_track)
+        dock_layout.addWidget(btn_add_track)
+        
+        # Add a "Sync Zoom" button to the control panel.
+        btn_sync_zoom = QPushButton("Sync Zoom")
+        btn_sync_zoom.clicked.connect(self.sync_zoom)
+        dock_layout.addWidget(btn_sync_zoom)
+        
+        dock_widget.setLayout(dock_layout)
+        self.dock.setWidget(dock_widget)
+        
+        self.statusBar().showMessage('Ready')
+
+    def toggle_controls(self):
+        self.dock.setVisible(not self.dock.isVisible())
+
+    def load_las_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Folder Containing LAS Files")
+        if folder:
+            for filename in os.listdir(folder):
+                if filename.lower().endswith(".las"):
+                    full_path = os.path.join(folder, filename)
+                    self.load_las_file(full_path)
+            self.update_plot()
+    
+    def load_las_file(self, path):
+        try:
+            las = lasio.read(path)
+            df = las.df()
+            df.reset_index(inplace=True)
+            # Find a valid depth column.
+            depth_col = next((col for col in df.columns if col.upper() in ["DEPT", "DEPTH", "MD"]), None)
+            if depth_col is None:
+                raise ValueError("No valid depth column found.")
+            df.rename(columns={depth_col: "DEPT"}, inplace=True)
+            well_name = las.well.WELL.value if las.well.WELL.value else os.path.basename(path)
+            if well_name in self.wells:
+                return
+            self.wells[well_name] = {'data': df, 'path': path}
+            # Create checkable list item (unchecked by default).
+            item = QListWidgetItem(well_name)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Unchecked)
+            self.well_list.addItem(item)
+            self.statusBar().showMessage(f"Loaded: {well_name}")
+        except Exception as e:
+            self.statusBar().showMessage(f"Error loading {path}: {str(e)}")
+
+    def add_track(self):
+        if not self.wells:
+            self.statusBar().showMessage("No wells loaded!")
+            return
+        curves_set = set()
+        for well in self.wells.values():
+            curves_set.update(well['data'].columns)
+        curves = sorted(list(curves_set))
+        track = TrackControl(len(self.tracks) + 1, curves)
+        track.changed.connect(self.update_plot)
+        track.deleteRequested.connect(self.delete_track)
+        self.tracks.append(track)
+        self.track_container.addWidget(track)
+        self.statusBar().showMessage(f"Added Track {track.number}")
+        self.update_plot()
+
+    def delete_track(self, track):
+        if track in self.tracks:
+            self.tracks.remove(track)
+            track.setParent(None)
+            track.deleteLater()
+            self.statusBar().showMessage(f"Deleted Track {track.number}")
+            self.update_plot()
+
+    def sync_zoom(self):
+        if not self.figure_widgets:
+            self.statusBar().showMessage("No figures to sync.")
+            return
+        # Use the first figure widget as the reference.
+        ref_widget = list(self.figure_widgets.values())[0]
+        ref_axes = ref_widget.figure.axes
+        for widget in self.figure_widgets.values():
+            for i, ax in enumerate(widget.figure.axes):
+                if i < len(ref_axes):
+                    ax.set_xlim(ref_axes[i].get_xlim())
+                    ax.set_ylim(ref_axes[i].get_ylim())
+            widget.canvas.draw()
+        self.statusBar().showMessage("Zoom synchronized across figures.")
+
+    def update_plot(self):
+        # Gather selected wells.
+        selected_wells = []
+        for i in range(self.well_list.count()):
+            item = self.well_list.item(i)
+            if item.checkState() == Qt.Checked:
+                well_name = item.text()
+                if well_name in self.wells:
+                    selected_wells.append(well_name)
+                    
+        # Remove figure widgets for deselected wells.
+        for well in list(self.figure_widgets.keys()):
+            if well not in selected_wells:
+                widget = self.figure_widgets[well]
+                self.figure_layout.removeWidget(widget)
+                widget.setParent(None)
+                widget.deleteLater()
+                del self.figure_widgets[well]
+                
+        # For each selected well, create/update its FigureWidget.
+        for well in selected_wells:
+            if well not in self.figure_widgets:
+                fig_widget = FigureWidget(well)
+                self.figure_widgets[well] = fig_widget
+                self.figure_layout.addWidget(fig_widget)
+            data = self.wells[well]['data']
+            self.figure_widgets[well].update_plot(data, self.tracks, well)
+
+    def loadStyle(self):
+        """Return QSS stylesheet for a modern look."""
+        return """
+        QWidget {
+            background-color: #2E3440;
+            color: rgb(138, 139, 140);
+            font-size: 14px;
+        }
+        QPushButton {
+            background-color: #4C566A;
+            border: 1px solid #D8DEE9;
+            padding: 8px;
+            border-radius: 5px;
+        }
+        QPushButton:hover {
+            background-color: #5E81AC;
+            border: 1px solid #81A1C1;
+        }
+        QListWidget {
+            background-color: #3B4252;
+            border: 1px solid #D8DEE9;
+            padding: 5px;
+        }
+        QLabel {
+            font-weight: bold;
+            color: rgb(166, 181, 208);
+            font-family: 'Fira Sans', sans-serif;
+        }
+        QComboBox, QSpinBox {
+            background-color: #4C566A;
+            border: 1px solid #81A1C1;
+            padding: 4px;
+        }
+        QCheckBox {
+            font-weight: bold;
+            color: #D8DEE9;
+        }
+        """
+
+# ----------------------------------------------------------------------
+# TrackControl Class: Widget for each track control with a "Delete" button.
+# ----------------------------------------------------------------------
+class TrackControl(QWidget):
+    changed = QtCore.pyqtSignal()
+    deleteRequested = QtCore.pyqtSignal(object)  # Signal to request deletion of this track
+
+    def __init__(self, number, curves):
+        super().__init__()
+        self.number = number
+        self.initUI(curves)
+
+    def initUI(self, curves):
+        layout = QHBoxLayout()
+        
+        self.curve = QComboBox()
+        self.curve.addItems(["Select Curve"] + curves)
+        self.curve.currentIndexChanged.connect(self.changed)
+        
+        self.color = QComboBox()
+        self.color.addItems(["black", "red", "blue", "green", "orange"])
+        self.color.currentIndexChanged.connect(self.changed)
+        
+        self.style = QComboBox()
+        self.style.addItems(["-", "--", ":", "-."])
+        self.style.currentIndexChanged.connect(self.changed)
+        
+        self.width = QSpinBox()
+        self.width.setRange(1, 5)
+        self.width.setValue(1)
+        self.width.valueChanged.connect(self.changed)
+        
+        self.grid = QCheckBox("Grid")
+        self.grid.stateChanged.connect(self.changed)
+        
+        self.flip = QCheckBox("Flip")
+        self.flip.stateChanged.connect(self.changed)
+        
+        self.btn_delete = QPushButton("Delete")
+        self.btn_delete.clicked.connect(self.handle_delete)
+        
+        layout.addWidget(QLabel(f"Track {self.number}"))
+        layout.addWidget(self.curve)
+        layout.addWidget(QLabel("Color:"))
+        layout.addWidget(self.color)
+        layout.addWidget(QLabel("Style:"))
+        layout.addWidget(self.style)
+        layout.addWidget(QLabel("Width:"))
+        layout.addWidget(self.width)
+        layout.addWidget(self.grid)
+        layout.addWidget(self.flip)
+        layout.addWidget(self.btn_delete)
+        self.setLayout(layout)
+    
+    def handle_delete(self):
+        self.deleteRequested.emit(self)
+
+# ----------------------------------------------------------------------
+# Main entry point
+# ----------------------------------------------------------------------
+if __name__ == '__main__':
+    app = QtWidgets.QApplication(sys.argv)
+    viewer = WellLogViewer()
+    viewer.show()
+    sys.exit(app.exec_())
